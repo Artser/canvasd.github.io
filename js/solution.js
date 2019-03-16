@@ -1,590 +1,668 @@
+
 'use strict';
-const POINT_EXPANDED = 0, // статус точки Развернутая
-    POINT_С OLLAPSED = 1, // свернутая
-    POINT_HIDDEN = 2; // скрытая
 
-const CLASS_POINT = 'comments__marker', // класс для точки
-    CLASS_COMMENT = 'comments__body',
-    CLASS_FORM = 'comments__form', // класс для формы
-    CLASS_OLD_COMMENT = 'comment__message', // класс для блока старого коммента в форме
-    CLASS_TEXT = 'comments__input'; // класс для textArea формы
+const app = document.querySelector('.app'),
+    menu = document.querySelector('.menu'),
+    menuBurger = document.querySelector('.burger'),
+    menuNew = document.querySelector('.new'),
+    menuComments = document.querySelector('.comments'),
+    commentsForm = document.querySelectorAll('.comments__form'),
+    menuDraw = document.querySelector('.draw'),
+    menuUrl = document.querySelector('.menu__url'),
+    currentImage = document.querySelector('.current-image'),
+    loader = document.querySelector('.image-loader'),
+    error = document.querySelector('.error'),
+    commentsWrap = document.createElement('div'),
+    canvas = document.createElement('canvas');
 
-const currentAuthor = 'Виктор'; // Используется при сохранении комментария
+let connection,
+    imageData,
+    showComments = {},
+    host,
+    movedPiece = null,
+    minY, minX, maxX, maxY,
+    shiftX = 0,
+    shiftY = 0,
+    url = new URL(`${window.location.href}`),
+    paramId = url.searchParams.get('id'); 
 
-const body = document.querySelector('body'),
-    inpImage = document.querySelector('#inpImage'),
-    butShow = document.querySelector('#comments-on'),
-    butHide = document.querySelector('#comments-off'),
-    view = document.querySelector('.wrap'),
-    canvas = document.querySelector('#graphCanvas'),
-    divComments = document.querySelector('.block-comments'),
-    ctx = canvas.getContext('2d');
+currentImage.src = ''; 
+menu.dataset.state = 'initial'; 
+app.dataset.state = '';
+hideElement(menuBurger); 
+app.removeChild(document.querySelector('.comments__form')); 
 
-// Эта штука задаёт структуру данных для добавляемых DOM-элементов
-const e = (name, props, ...childs) => ({
-    name, props, childs
-});
+//перемещаем меню
+document.addEventListener('mousedown', dragStart);
+document.addEventListener('mousemove', throttle(drag));
+document.addEventListener('mouseup', drop);
 
-butShow.addEventListener('click', showAllPoints);
-
-butHide.addEventListener('click', hideAllPointsAndForms);
-
-
-function hideAllForms() {
-    const forms = getAllForms();
-    Array.from(forms).forEach(hideForm);
-}
-
-function getAllForms() {
-    return document.querySelectorAll(`.${CLASS_COMMENT}`);
-}
-
-function showPoint(p) {
-    p.style.display = 'block';
-}
-
-function hidePoint(p) {
-    p.style.display = 'none';
-}
-
-function showAllPoints() {
-    const points = getAllPointsDOM();
-    Array.from(points).forEach(showPoint);
-}
-
-function hideAllPoints() {
-    const points = getAllPointsDOM();
-    Array.from(points).forEach(hidePoint);
-}
-
-function deletePoint(p) {
-    divComments.removeChild(p);
-}
-
-// Функция конструирует DOM-фрагмент
-function createElement(node) {
-    if (typeof node === 'string') {
-        return document.createTextNode(node);
+function dragStart(event) {
+    if (event.target.classList.contains('drag')) {
+        movedPiece = event.target.parentElement;
+        minX = app.offsetLeft;
+        minY = app.offsetTop;
+            
+        maxX = app.offsetLeft + app.offsetWidth - movedPiece.offsetWidth;
+        maxY = app.offsetTop + app.offsetHeight - movedPiece.offsetHeight;
+            
+        shiftX = event.pageX - event.target.getBoundingClientRect().left - window.pageXOffset;
+        shiftY = event.pageY - event.target.getBoundingClientRect().top - window.pageYOffset;
     }
-    const element = document.createElement(node.name);
-    if ((node.props !== null) && (typeof node.props === 'object')) {
-        Object.keys(node.props).forEach(i => element.setAttribute(i, node.props[i]));
+}
+
+function drag(event) {
+    if (movedPiece) {
+        let x = event.pageX - shiftX;
+        let y = event.pageY - shiftY;
+        x = Math.min(x, maxX);
+        y = Math.min(y, maxY);
+        x = Math.max(x, minX);
+        y = Math.max(y, minY);
+        movedPiece.style.left = x + 'px';
+        movedPiece.style.top = y + 'px';
     }
-    if (node.childs instanceof Array) {
-        node.childs.forEach(child => element.appendChild(createElement(child)));
+}
+
+function drop(event) {
+    if (movedPiece) {
+        movedPiece = null;
     }
-    return element;
 }
 
-// Добавление нового комментария (текст берётся из самой формы)
-function addNewComment(f) {
-
-    const ta = getTextAreaInForm(f);
-
-    // Сохраняем комментарий как CLASS_OLD_COMMENT, если он есть, иначе требуем ввести его
-    if (isTextInForm(f)) {
-
-        const text = getTextInForm(f),
-            newComment = createElement(createDivOldComment(currentAuthor, text));
-
-        f.insertBefore(newComment, ta); // новый комментарий встаёт перед текстовым полем
-        clearTextInForm(f); // чистим поле ввода текста
-
-    } else {
-        alert('Нужен комментарий!');
+//если меню "съезжает"
+function checkMenuLength() {
+    if (menu.offsetHeight > 100) {
+        menu.style.left = (app.offsetWidth - menu.offsetWidth - 1) + 'px';
     }
-
 }
 
-function getTextAreaInForm(f) {
-    return f.querySelector(`.${CLASS_TEXT}`);
+function checkMenuLengthTick() {
+    checkMenuLength();
+    window.requestAnimationFrame(checkMenuLengthTick);
 }
 
-function isTextInForm(f) {
-    return getTextInForm(f) !== '';
-}
+checkMenuLengthTick();
 
-function getTextInForm(f) {
-    const ta = getTextAreaInForm(f);
-    return ta.value.trim();
-}
+//открываем файл
+menuNew.addEventListener('click', onSelectFiles); 
+app.addEventListener('drop', onFilesDrop); 
+app.addEventListener('dragover', event => event.preventDefault()); 
 
-// Создаём div-блок с комментарием
-function createDivOldComment(author, text) {
-    //let com = e('div', { 'class': 'comment' });
-    let p_author = e('div', {
-        'class': 'comment__author'
-    }, `${author}`);
-    let p_message = e('div', {
-        'class': 'comment__message'
-    }, `${text}`);
-    return e('div', {
-        'class': 'comment'
-    }, `${p_author} ${p_message}`);
-}
+function onSelectFiles(event) {
+    hideElement(error);
+    const input = document.createElement('input');
+    input.setAttribute('type', 'file');
+    input.setAttribute('accept', 'image/jpeg, image/png');
+    hideElement(input);
+    menu.appendChild(input);
 
-// ------------------------ Работа с точками ----------------------
-
-// Методы, возвращающие результат
-
-function isShowedPoint(p) {
-    return p.style.display !== 'none';
-}
-
-// Найти точку в DOMе по id
-function findPointById(id) {
-    return document.querySelector(`.${CLASS_POINT}[data-id='${id}']`);
-}
-
-function getAllPointsDOM() {
-    return document.querySelectorAll(`.${CLASS_POINT}`);
-}
-
-// Генерация новой точки
-function generateNewPoint(newX, newY) {
-    const max = 1000,
-        min = 50; // значения взяты произвольными для демки
-    const newId = Math.floor(Math.random() * (max - min)) + min; // как будто получаем новый ID
-
-    // возвращаем Точку = объект с полями
-    return {
-        id: newId,
-        x: newX,
-        y: newY,
-        comments: [] // у новой точки нет комментариев
-    };
-
-}
-
-function addPoint(p, status) {
-
-    const newForm = createElement(addForm(p, status)); // создаём форму комментирования с присланным статусом
-
-    const pointStruct = e('span', {
-        'class': CLASS_POINT,
-        'style': `position: absolute; left: ${p.x-10}px; top:${p.y-10}px;`,
+    input.addEventListener('change', event => {
+        const file = event.currentTarget.files[0];
+        if (currentImage.dataset.load === 'load') {
+            removeForm();
+            curves = []; 
+        }
+        sendFile(file);
     });
 
-    const newPoint = createElement(pointStruct);
-
-    const inputStruct = e('input', {
-        'class': 'comments__marker-checkbox',
-        'type': 'checkbox',
-    });
-
-
-    newForm.appendChild(newPoint);
-    newForm.appendChild(inputStruct);
-    newPoint.addEventListener('click', pointCommentOnClick);
-
-    showPoint(newPoint); // по умолчанию точка показывается
-
+    input.click();
+    menu.removeChild(input);
 }
 
-// Нажали на точку
-function pointCommentOnClick(e) {
-
-    const point = e.currentTarget,
-        id = point.dataset.id,
-        form = findFormById(id);
-
-    // Логика: если есть открытая форма, то сворачиваем её
-    const showedForm = findShowedForm();
-
-    if (showedForm) {
-        hideForm(showedForm);
+function onFilesDrop(event) {
+    event.preventDefault();
+    hideElement(error);
+    const file = event.dataTransfer.files[0];
+    
+    if (currentImage.dataset.load === 'load') {
+        showElement(error);
+        error.lastElementChild.textContent = 'Чтобы загрузить новое изображение, пожалуйста, воспользуйтесь пунктом "Загрузить новое" в меню';
+        removeError();
+        return;
     }
 
-    // При клике на точку следующая логика: если форма для этой точки показана, то сворачиваем, и наоборот
-    (isShowedForm(form)) ? hideForm(form) : showForm(form);
-}
-
-// ------------------------ Работа с формами ----------------------
-
-// Методы, возвращающие результат
-
-function isShowedForm(f) {
-    return f.style.display !== 'none';
-}
-
-function isFormHasComments(f) {
-    return f.querySelector(`.${CLASS_OLD_COMMENT}`) !== null;
-}
-
-
-function findShowedForm() {
-    const forms = getAllForms();
-    return Array.from(forms).find(isShowedForm);
-}
-
-// Найти форму в DOMе по id
-function findFormById(id) {
-    return document.querySelector(`.${CLASS_FORM}[data-id='${id}']`);
-}
-
-
-// Методы, не возвращающие результат
-
-function showForm(f) {
-    f.style.display = 'block';
-}
-
-function clearTextInForm(f) {
-    const ta = getTextAreaInForm(f);
-    ta.value = '';
-}
-
-function deleteForm(f) {
-    divComments.removeChild(f);
-}
-
-function hideForm(f) {
-    const id = f.dataset.id,
-        point = findPointById(id);
-
-    // Проверка: если в форме ещё ни одного комментария и пустой текст, то удаляем точку и форму
-    if (!isFormHasComments(f) && !isTextInForm(f)) {
-        deletePoint(point);
-        deleteForm(f);
+    if (file.type === 'image/jpeg' || file.type === 'image/png') {
+        sendFile(file);
     } else {
-        // Иначе просто прячем её
-        f.style.display = 'none';
+        showElement(error);
     }
 }
 
-// Нажали кнопку Закрыть внутри формы
-function closeFormComment(e) {
-    e.preventDefault();
+// загружаем изображение на сервер
+function sendFile(file) {
+    const formData = new FormData();
+    formData.append('title', file.name);
+    formData.append('image', file);
+    
+    showElement(loader);
 
-    // Функция скрывает форму, на кнопке «Закрыть» которой сработало событие
-    const form = e.currentTarget.closest('form');
-    hideForm(form);
-}
-
-// Нажали кнопку «Добавить» на форме
-function submitFormComment(e) {
-    e.preventDefault();
-
-    const form = e.currentTarget.closest('form');
-    addNewComment(form);
-}
-
-// Функция создаёт по заданной структуре форму комментирования для заданной точки
-function addForm(point, status) {
-
-    // получаем массив блоков со старыми комментариями, дальше его деструктуризуем
-    const comments = point.comments ? point.comments.map(p => createDivOldComment(p.author, p.text)) : [];
-
-    const formStruct =
-        e(
-            'form', {
-                'class': CLASS_FORM,
-                'style': `position: absolute; left: ${point.x+15}px; top:${point.y}px;`,
-                'data-id': `${point.id}`
-            },
-
-            `${div_com}`
-    );
-
-    const div_com = e(
-        'div', {
-            'class': 'comments__body'
-        },
-        e('textarea', {
-            'class': CLASS_TEXT
-        }),
-        e('button', {
-            'class': 'submit-comment'
-        }, 'Добавить'),
-        e('button', {
-            'class': 'close-comment'
-        }, 'Закрыть'),
-    );
-    const newForm = createElement(formStruct);
-
-    divComments.appendChild(newForm);
-    // навешиваем обработчик на кнопку «Добавить» в только что добавленной форме
-    newForm.querySelector('.submit-comment').addEventListener('click', submitFormComment);
-
-    // и на кнопку «Закрыть»
-    newForm.querySelector('.close-comment').addEventListener('click', closeFormComment);
-
-    // если прислан статус «Форма должна быть развёрнута», то показываем её, иначе — скрываем
-    (status === POINT_EXPANDED) ? showForm(newForm) : hideForm(newForm);
-}
-
-
-// Совместная работа с точками и формами
-
-function hideAllPointsAndForms() {
-    hideAllPoints();
-    hideAllForms();
-}
-
-// Загрузка картинки -->
-inpImage.addEventListener('change', onUpload, false);
-
-function onUpload() {
-    setImageToCanvas(this.files[0]);
-}
-
-function setImageToCanvas(myFile) {
-    canvas.style.backgroundImage = `url(${URL.createObjectURL(myFile)})`;
-}
-// <-- Загрузка картинки
-
-
-// Дроп -->
-canvas.addEventListener('drop', function(ev) {
-    ev.preventDefault();
-    var dt = ev.dataTransfer;
-    var myFile;
-    myFile = (dt.items) ? dt.items[0].getAsFile() : dt.files[0];
-    setImageToCanvas(myFile);
-});
-
-
-// Без этого дроп не работает
-canvas.addEventListener('dragover', function(e) {
-    e.stopPropagation();
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
-});
-
-// <-- Дроп
-
-
-// Клик на картинке => новая точка комментирования -->
-function newPointComment(e) {
-    // Проверка: можно ли сейчас добавлять новую точку?
-    // Логика: если есть открытая форма, то сворачиваем её, а не создаём новую точку
-    const showedForm = findShowedForm();
-
-    if (showedForm) {
-        hideForm(showedForm);
-    } else {
-        const newPoint = generateNewPoint(e.pageX, e.pageY);
-        addPoint(newPoint, POINT_EXPANDED); // форма будет показана сразу		
-    }
-}
-
-hideAllPointsAndForms();
-
-
-/*------------------------------ Переключения -------------------------*/
-var menu = document.getElementsByClassName("menu")[0];
-var burger = document.getElementsByClassName("burger")[0];
-
-
-burger.addEventListener('click', function() {
-    if (menu.dataset.state == 'initial' || menu.dataset.state == 'selected') {
-        menu.dataset.state = "default";
-    }
-    let modes = new Array(document.getElementsByClassName("mode"))[0];
-    modes = [].slice.call(modes);
-
-    modes.forEach(function(mode) {
-        mode.dataset.state = '';
-    });
-});
-
-function modeOnClick(e) {
-    if (this.dataset.state === '') {
-        // Убираем обработчики секции Комментарии, скрываем точки и формы
-        canvas.removeEventListener("click", newPointComment);
-        hideAllPointsAndForms();
-
-        // Убираем обработчики секции Рисование
-        canvas.removeEventListener("mousedown", paintCanvasOnMouseDown);
-        canvas.removeEventListener("mouseup", paintCanvasOnMouseUpLeave);
-        canvas.removeEventListener("mouseleave", paintCanvasOnMouseUpLeave);
-        canvas.removeEventListener("mousemove", paintCanvasOnMouseMove);
-        canvas.removeEventListener('dblclick', clearPaint);
-
-
-        this.dataset.state = "selected";
-        menu.dataset.state = "selected";
-
-        if (this.classList.contains('draw')) {
-            canvas.addEventListener("mousedown", paintCanvasOnMouseDown);
-            canvas.addEventListener("mouseup", paintCanvasOnMouseUpLeave);
-            canvas.addEventListener("mouseleave", paintCanvasOnMouseUpLeave);
-            canvas.addEventListener("mousemove", paintCanvasOnMouseMove);
-            canvas.addEventListener('dblclick', clearPaint);
-            tick();
-        } else if (this.classList.contains('comments')) {
-            if (document.querySelector('input.menu__toggle[type="radio"]').checked) {
-                showAllPoints();
+    fetch(`https://neto-api.herokuapp.com/pic`, {
+            body: formData,
+            credentials: 'same-origin',
+            method: 'POST'
+        })
+        .then( res => {
+            if (200 <= res.status && res.status < 300) {
+                return res;
             }
+            throw new Error (res.statusText);
+        })
+        .then(res => res.json())
+        .then(res => {
+            getFile(res.id);
+        })
+        .catch(err => {
+            console.log(err);
+            hideElement(loader);
+        });
+}
 
-            canvas.addEventListener('click', newPointComment);
+// удаляем формы комментариев при загрузке нового изображения
+function removeForm() {
+    Array.from(commentsForm).forEach(comment => {comment.remove()});
+}
+
+// получаем информацию о файле
+function getFile(id) {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', `https://neto-api.herokuapp.com/pic/${id}`, false);
+    xhr.send();
+
+    imageData = JSON.parse(xhr.responseText);
+    host = document.location.href.split('?')[0] + `?id=${imageData.id}`;
+    history.pushState(null, null, host);
+    wss();  
+    currentImage.src = imageData.url;
+    menuBurger.style.cssText = ``;
+    showMenu();
+
+    currentImage.addEventListener('load', () => {
+        hideElement(loader);
+        currentImage.dataset.load = 'load';
+        createCanvas();
+        createWrapforComment();
+        updateCommentForm(imageData.comments);
+    });
+}
+
+//открываем меню
+menuBurger.addEventListener('click', showMenu);
+
+function showMenu() {
+    menu.dataset.state = 'default';
+    Array.from(menu.querySelectorAll('.mode')).forEach(mode => {
+        mode.dataset.state = '';
+        mode.addEventListener('click', () => {
+            if (!mode.classList.contains('new')){
+                menu.dataset.state = 'selected';
+                mode.dataset.state = 'selected';
+            }
+            
+            if (mode.classList.contains('share')) {
+                menuUrl.value = host;
+            }
+        })
+    })
+}
+ 
+//Комментарии
+//показываем меню "Комментарии"
+function showMenuComments() {
+    menu.dataset.state = 'default';
+    Array.from(menu.querySelectorAll('.mode')).forEach(item => {
+        if (item.classList.contains('comments')) {
+            menu.dataset.state = 'selected';
+            item.dataset.state = 'selected';
+        }
+    });
+}
+
+//показываем/убираем комментарии
+const commentsOn = document.querySelector('#comments-on'),
+    commentsOff = document.querySelector('#comments-off');
+
+commentsOn.addEventListener('click', () => {
+    document.querySelectorAll('.comments__form').forEach(form => form.style.display = '');
+});
+commentsOff.addEventListener('click', () => {
+    document.querySelectorAll('.comments__form').forEach(form => form.style.display = 'none');
+});
+
+canvas.addEventListener('click', (event) => {
+    hideForms();
+    removeForm();
+    if (menuComments.dataset.state === 'selected' && commentsOn.checked) {
+        const newMessage = createCommentForm(event.offsetX, event.offsetY);
+        newMessage.querySelector('.comments__marker-checkbox').checked = true;
+        commentsWrap.appendChild(newMessage);
+    }
+}); 
+
+function createCanvas() {
+    const width = getComputedStyle(app.querySelector('.current-image')).width.slice(0, -2);
+    const height = getComputedStyle(app.querySelector('.current-image')).height.slice(0, -2);
+    canvas.width = width;
+    canvas.height = height;
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    canvas.style.position = 'absolute';
+    canvas.style.top = '0';
+    canvas.style.left = '0';
+    canvas.style.display = 'block';
+    canvas.style.zIndex = '1';
+
+    commentsWrap.appendChild(canvas);
+}
+
+// создаем обертку для комментариев
+function createWrapforComment() {
+    const width = getComputedStyle(currentImage).width;
+    const height = getComputedStyle(currentImage).height;
+    commentsWrap.style.cssText = `
+        width: ${width};
+        height: ${height};
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        display: block;
+    `;
+    app.appendChild(commentsWrap);
+
+    // отображаем комментарии (по клику) поверх остальных
+    commentsWrap.addEventListener('click', event => {
+        if (event.target.closest('.comments__form')) {
+            const currentForm = event.target.closest('.comments__form');
+            commentsWrap.querySelectorAll('.comments__form').forEach(form => {
+                form.style.zIndex = 2;
+            });
+            currentForm.style.zIndex = 3;
+            hideForms(currentForm);
+            removeForm(currentForm);
+        }
+    });
+}
+
+//создаем форму для комментариев
+function createCommentForm(x, y) {
+    const formComment = document.createElement('form');
+    formComment.classList.add('comments__form');
+    formComment.innerHTML = `
+        <span class="comments__marker"></span><input type="checkbox" class="comments__marker-checkbox">
+        <div class="comments__body">
+            <div class="comment">
+                <div class="loader">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </div>
+            <textarea class="comments__input" type="text" placeholder="Напишите ответ..."></textarea>
+            <input class="comments__close" type="button" value="Закрыть">
+            <input class="comments__submit" type="submit" value="Отправить">
+        </div>`;
+
+    //смещение, чтобы маркер встал туда, куда кликнули
+    const left = x - 20,
+        top = y;
+
+    formComment.style.cssText = `
+        top: ${top}px;
+        left: ${left}px;
+        z-index: 2;
+    `;
+    formComment.dataset.left = left;
+    formComment.dataset.top = top;
+
+    hideElement(formComment.querySelector('.loader').parentElement);
+
+    //кнопка "закрыть"
+    formComment.querySelector('.comments__close').addEventListener('click', () => {
+        if (formComment.querySelectorAll('.comment').length > 1) {
+            formComment.querySelector('.comments__marker-checkbox').checked = false;
+        } else {
+            formComment.remove();
+        }
+    });
+
+    // кнопка "отправить"
+    formComment.addEventListener('submit', sendMessage);
+
+    function sendMessage(event) {
+        event.preventDefault();
+        const message = formComment.querySelector('.comments__input').value,
+            sendMessage = `message=${encodeURIComponent(message)}&left=${encodeURIComponent(left)}&top=${encodeURIComponent(top)}`;
+        commentsSend(sendMessage);
+        showElement(formComment.querySelector('.loader').parentElement);
+        formComment.querySelector('.comments__input').value = '';
+    }
+
+    // отправляем комментарий на сервер
+    function commentsSend(message) {
+        fetch(`https://neto-api.herokuapp.com/pic/${imageData.id}/comments`, {
+                method: 'POST',
+                body: message,
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+            })
+            .then( res => {
+                if (res.status >= 200 && res.status < 300) {
+                    hideElement(formComment.querySelector('.loader').parentElement);
+                    return res;
+                }
+                throw new Error (res.statusText);
+            })
+            .then(res => res.json())
+            .catch(err => {
+                console.log(err);
+                hideElement(formComment.querySelector('.loader').parentElement);;
+            });
+    }
+    return formComment;
+}
+
+function hideForms(currentForm = null) {
+    document.querySelectorAll('.comments__form').forEach(form => {
+        if (form !== currentForm) {
+            form.querySelector('.comments__marker-checkbox').checked = false;
+        }
+    });
+}
+
+function removeForm(currentForm = null) {
+    document.querySelectorAll('.comments__form').forEach(form => {
+        if ( form !== currentForm && form.querySelectorAll('.comment').length < 2) {
+            form.remove();
+        }
+    })
+}
+
+//добавляем комментарий в форму
+function addMessageComment(message, form) {
+    let parentLoaderDiv = form.querySelector('.loader').parentElement;
+
+    const newMessageDiv = document.createElement('div');
+    newMessageDiv.classList.add('comment');
+    newMessageDiv.dataset.timestamp = message.timestamp;
+        
+    const commentTimeP = document.createElement('p');
+    commentTimeP.classList.add('comment__time');
+    commentTimeP.textContent = getDate(message.timestamp);
+
+    newMessageDiv.appendChild(commentTimeP);
+
+    const commentMessageP = document.createElement('p');
+    commentMessageP.classList.add('comment__message');
+    commentMessageP.textContent = message.message;
+    commentMessageP.style.cssText = `word-wrap: break-word;
+                                    white-space: pre-wrap`;
+
+    newMessageDiv.appendChild(commentMessageP);
+    form.querySelector('.comments__body').insertBefore(newMessageDiv, parentLoaderDiv);
+}
+
+//обновляем формы с комментариями
+function updateCommentForm(newComment) {
+    if (!newComment) return;
+
+    Object.keys(newComment).forEach(id => {
+        if (id in showComments) return;
+            
+        showComments[id] = newComment[id];
+        let needCreateNewForm = true;
+
+        Array.from(app.querySelectorAll('.comments__form')).forEach(form => {
+            if (+form.dataset.left === showComments[id].left && +form.dataset.top === showComments[id].top) {
+                form.querySelector('.loader').parentElement.style.display = 'none';
+                addMessageComment(newComment[id], form); 
+                needCreateNewForm = false;
+            }
+        });
+
+        //создаем форму и добавляем в нее сообщение
+        if (needCreateNewForm) {
+            const newForm = createCommentForm(newComment[id].left + 20, newComment[id].top);
+            newForm.dataset.left = newComment[id].left;
+            newForm.dataset.top = newComment[id].top;
+            newForm.style.left = newComment[id].left + 'px';
+            newForm.style.top = newComment[id].top + 'px';
+            commentsWrap.appendChild(newForm);
+            addMessageComment(newComment[id], newForm);
+
+            if (!app.querySelector('#comments-on').checked) {
+                newForm.style.display = 'none';
+            }
+        }
+    });
+}
+
+//добавляем сообщения с сервера 
+function insertWssCommentForm(wssComment) {
+    const wsCommentEdited = {};
+    wsCommentEdited[wssComment.id] = {};
+    wsCommentEdited[wssComment.id].left = wssComment.left;
+    wsCommentEdited[wssComment.id].message = wssComment.message;
+    wsCommentEdited[wssComment.id].timestamp = wssComment.timestamp;
+    wsCommentEdited[wssComment.id].top = wssComment.top;
+    updateCommentForm(wsCommentEdited);
+}
+
+//преобразуем дату и время
+function getDate(timestamp) {
+    const options = {
+        day: '2-digit',
+        month: '2-digit',
+        year: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    };
+    const date = new Date(timestamp),
+        dateStr = date.toLocaleString('ru-RU', options);
+
+    return dateStr.slice(0, 8) + dateStr.slice(9);
+}
+
+//Рисование
+const ctx = canvas.getContext('2d');
+let currentColor,
+    BRUSH_RADIUS = 4,
+    curves = [],
+    drawing = false,
+    needsRepaint = false;
+
+// выбираем цвет
+Array.from(menu.querySelectorAll('.menu__color')).forEach(color => {
+    if (color.checked) {  
+        currentColor = getComputedStyle(color.nextElementSibling).backgroundColor;  
+    }
+    color.addEventListener('click', (event) => {  
+        currentColor = getComputedStyle(event.currentTarget.nextElementSibling).backgroundColor; 
+    });
+});
+
+canvas.addEventListener("mousedown", (event) => {
+    if (!(menuDraw.dataset.state === 'selected')) return;
+
+    hideForms();
+    drawing = true;
+    canvas.style.zIndex = '4';
+
+    const curve = []; 
+    curve.color = currentColor;
+
+    curve.push(makePoint(event.offsetX, event.offsetY)); 
+    curves.push(curve); 
+    console.log(curve);
+    needsRepaint = true;
+});
+
+canvas.addEventListener("mouseup", (event) => {
+    menu.style.zIndex = '1';
+    canvas.style.zIndex = '1';
+    drawing = false;
+});
+
+canvas.addEventListener("mouseleave", (event) => {
+    menu.style.zIndex = '1';
+    canvas.style.zIndex = '1';
+    drawing = false;
+});
+
+canvas.addEventListener("mousemove", (event) => {
+    if (drawing) {
+        menu.style.zIndex = '0';
+        canvas.style.zIndex = '4';
+        curves[curves.length - 1].push(makePoint(event.offsetX, event.offsetY));
+        needsRepaint = true;
+        debounceSendMask();
+    }
+});
+
+const debounceSendMask = debounce(sendMaskState, 1000);
+
+function sendMaskState() {
+    canvas.toBlob(function (blob) {
+        connection.send(blob);
+    });
+};
+
+function circle(point) {
+    ctx.beginPath();
+    ctx.arc(...point, BRUSH_RADIUS / 2, 0, 2 * Math.PI);
+    ctx.fill();
+}
+
+function smoothCurveBetween (p1, p2) {
+    const cp = p1.map((coord, idx) => (coord + p2[idx]) / 2);
+    ctx.quadraticCurveTo(...p1, ...cp);
+}
+
+function smoothCurve(points) {
+    ctx.beginPath();
+    ctx.lineWidth = BRUSH_RADIUS;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    ctx.moveTo(...points[0]);
+
+    for(let i = 1; i < points.length - 1; i++) {
+        smoothCurveBetween(points[i], points[i + 1]);
+    }
+    ctx.stroke();
+}
+
+function makePoint(x, y) {
+    return [x, y];
+}
+
+function repaint () {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    curves.forEach((curve) => {
+        ctx.strokeStyle = curve.color;
+        ctx.fillStyle = curve.color;
+    
+        circle(curve[0]);
+        smoothCurve(curve);
+    });
+};
+
+function tick () {
+    if(needsRepaint) {
+        repaint();
+        needsRepaint = false;
+    }
+    window.requestAnimationFrame(tick);
+};
+
+tick();
+
+
+//Копируем ссылку
+menu.querySelector('.menu_copy').addEventListener('click', copyUrl); 
+urlId(paramId); 
+
+function copyUrl() {  
+    menu.querySelector('.menu__url').select(); 
+    document.execCommand('copy'); 
+}
+
+function urlId(id) {
+    if (!id) return;
+
+    getFile(id);
+    showMenuComments();
+}
+
+//веб-сокет
+function wss() {
+    connection = new WebSocket(`wss://neto-api.herokuapp.com/pic/${imageData.id}`);
+    connection.addEventListener('message', event => {
+        if (JSON.parse(event.data).event === 'pic'){
+            if (JSON.parse(event.data).pic.mask) {
+                canvas.style.background = `url(${JSON.parse(event.data).pic.mask})`;
+            } else {
+                canvas.style.background = ``;
+            }
+        }
+
+        if (JSON.parse(event.data).event === 'comment'){
+            insertWssCommentForm(JSON.parse(event.data).comment);
+        }
+
+        if (JSON.parse(event.data).event === 'mask'){
+            canvas.style.background = `url(${JSON.parse(event.data).url})`;
+        }
+    });
+}
+
+// скрываем элементы
+function hideElement(el) {
+    el.style.display = 'none';
+}
+
+// показываем элементы
+function showElement(el) {
+    el.style.display = '';
+}
+
+// скрываем текст ошибки
+function removeError() {
+    setTimeout(function() {
+        hideElement(error)
+    }, 5000);
+}
+
+// ограничения частоты запуска функции
+function throttle(func, delay = 0) {
+    let isWaiting = false;
+    
+    return function (...res) {
+        if (!isWaiting) {
+            func.apply(this, res);  
+            isWaiting = true;       
+            setTimeout(() => {  
+                isWaiting = false;
+            }, delay);
         }
     }
 }
 
-let modes = new Array(document.getElementsByClassName("mode"))[0];
-modes = [].slice.call(modes);
-
-modes.forEach(function(mode) {
-    mode.addEventListener('click', modeOnClick);
-});
-
-
-
-/*-------------------- Рисование -------------------------*/
-
-// При двойном клике холст необходимо очистить.
-
-function clearPaint(e) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height); // зачистка
-    curves = []; // забываем все линии	
-}
-
-//------------------------------------
-let curves = [];
-let drawing = false;
-let needsRepaint = false;
-
-let brush_radius = 5;
-
-
-// При открытии страницы необходимо установить размер холста равным размеру окна браузера.
-canvas.width = screen.width;
-canvas.height = screen.height;
-//console.log('Размер окна', canvas.width, canvas.height);
-ctx.clearRect(0, 0, canvas.width, canvas.height); // зачистка
-
-// При изменении размеров окна браузера необходимо обновить размер холста и очистить его.
-window.addEventListener('resize', function(e) {
-    canvas.width = screen.width;
-    canvas.height = screen.height;
-    //console.log('Размер окна', canvas.width, canvas.height);
-    ctx.clearRect(0, 0, canvas.width, canvas.height); // зачистка
-    curves = []; // забываем все линии
-});
-
-
-// Отрисовка линии
-function smoothCurve(points) {
-    let lenPointsMinus1 = points.length - 1;
-    for (let i = 0; i < lenPointsMinus1; i++) {
-        ctx.beginPath();
-        //Необходимо скруглить края линии, задав свойствам контекста lineJoin и lineCap значение round.
-        ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
-        ctx.strokeStyle = points[i].colorFill;
-        ctx.moveTo(points[i].x, points[i].y);
-        ctx.lineWidth = points[i].radius;
-        ctx.lineTo(points[i + 1].x, points[i + 1].y);
-        ctx.stroke();
-    }
-}
-
-function makePoint(x, y) {
-    let result = {
-        x: x,
-        y: y,
-        radius: brush_radius,
-        colorFill: document.querySelector('.draw-tools input[type="radio"]:checked').value
-    }
-
-    return result;
-};
-
-function paintCanvasOnMouseDown(evt) {
-    drawing = true;
-
-    const curve = []; // create a new curve
-
-    curve.push(makePoint(evt.offsetX, evt.offsetY)); // add a new point
-    curves.push(curve); // add the curve to the array of curves
-    needsRepaint = true;
-}
-
-function paintCanvasOnMouseUpLeave(evt) {
-    drawing = false;
-}
-
-function paintCanvasOnMouseMove(evt) {
-    if (drawing) {
-        // add a point
-
-        const point = makePoint(evt.offsetX, evt.offsetY);
-        curves[curves.length - 1].push(point);
-        needsRepaint = true;
-    }
-}
-
-// rendering
-function repaint() {
-    // clear before repainting
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    curves.forEach((curve) => {
-        smoothCurve(curve);
-    });
-}
-
-function tick() {
-    if (needsRepaint) {
-        repaint();
-        needsRepaint = false;
-    }
-
-    window.requestAnimationFrame(tick);
-}
-
-
-document.querySelector('.menu__eraser').addEventListener('click', function(e) {
-    if (curves.length > 0) {
-        curves.pop();
-        needsRepaint = true;
-    }
-});
-
-
-
-
-var drag = document.getElementsByClassName('drag')[0];
-var dragMenu = document.getElementsByClassName('menu')[0];
-
-drag.onmousedown = function(e) {
-
-    var coords = getCoords(dragMenu);
-    var shiftX = e.pageX - coords.left;
-    var shiftY = e.pageY - coords.top;
-
-    dragMenu.style.position = 'absolute';
-    document.body.appendChild(dragMenu);
-    moveAt(e);
-
-    dragMenu.style.zIndex = 1000;
-
-    function moveAt(e) {
-        dragMenu.style.left = e.pageX - shiftX + 'px';
-        dragMenu.style.top = e.pageY - shiftY + 'px';
-    }
-
-    document.onmousemove = function(e) {
-        moveAt(e);
-    };
-
-    drag.onmouseup = function() {
-        document.onmousemove = null;
-        drag.onmouseup = null;
-        dragMenu.onmousemove = null;
-    };
-
-}
-
-dragMenu.ondragstart = function() {
-    return false;
-};
-
-function getCoords(elem) {
-    var box = elem.getBoundingClientRect();
-    return {
-        top: box.top + pageYOffset,
-        left: box.left + pageXOffset
+// отложенный запуск функции, после завершения события
+function debounce(func, delay = 0) {
+    let timeout;
+    
+    return () => {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => {
+            timeout = null;
+            func();
+        }, delay);
     };
 }
+//закрываем веб-сокет соединение при уходе со страницы
+window.addEventListener('beforeunload', () => { connection.close(); console.log('Веб-сокет закрыт') }); 
